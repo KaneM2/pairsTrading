@@ -1,6 +1,8 @@
+from scripts.utils.util_classes import CustomLogger
+
 from pymongo import MongoClient , errors
 import pandas as pd
-from scripts.utils.util_classes import CustomLogger
+
 
 logger = CustomLogger.get_logger(name = __name__)
 

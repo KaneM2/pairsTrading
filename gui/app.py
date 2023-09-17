@@ -1,7 +1,9 @@
-from dash import Dash
-import dash_bootstrap_components as dbc
 from gui.layouts import layout
 from gui.callbacks import register_callbacks
+
+from dash import Dash
+import dash_bootstrap_components as dbc
+
 
 
 

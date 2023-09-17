@@ -1,7 +1,6 @@
 from scripts.utils.util_functions import read_config
 from scripts.pairs_selection.pairs_selector import distanceSelector, correlationSelector, cointergrationSelector
 from scripts.strategies.strategy import OLSStrategy, KalmanStrategy
-from scripts.db.db_interface import dbInterface
 from scripts.utils.util_classes import CustomLogger
 
 from dash import Input, Output, State, dcc, html
@@ -12,16 +11,6 @@ import plotly.graph_objects as go
 import pandas as pd
 
 logger = CustomLogger.get_logger(name=__name__)
-
-
-# config = read_config()
-#
-# tickers_collection_name = config['database']['collections']['tickers_collection_name']
-# price_collection_name = config['database']['collections']['price_collection_name']
-#
-# db = dbInterface(config=config['database'], ticker_collection=tickers_collection_name,
-#                  price_collection=price_collection_name)
-
 
 def render_content(tab, unique_sectors, unique_indices):
     config = read_config(key='data')
@@ -182,13 +171,27 @@ def render_content(tab, unique_sectors, unique_indices):
                 className='mb-4'
             ),
             dbc.Row([
-                dcc.Loading(
-                    id="loading",
-                    type="circle",  # or "default", "cube", "dot", "circular"
-                    children=[
-                        dcc.Graph(id='portfolio-graph', className='mb-4'),
-                    ]
-                )
+                dbc.Col([
+                    dcc.Loading(
+                        id="loading",
+                        type="circle",  # or "default", "cube", "dot", "circular"
+                        children=[
+                            dcc.Graph(id='portfolio-graph', className='mb-4'),
+                        ]
+                    )
+                ], width = 8),
+                dbc.Col([
+                    dbc.Table([
+                        html.Thead([
+                            html.Tr([html.Th("Statistic"), html.Th("Value")])
+                        ]),
+                        html.Tbody([
+                            html.Tr([html.Td("Max Drawdown"), html.Td(id='max_drawdown')]),
+                            html.Tr([html.Td("Sharpe Ratio"), html.Td(id='sharpe_ratio')]),
+                            html.Tr([html.Td("Sortino Ratio"), html.Td(id='sortino_ratio')]),
+                        ])
+                    ]),
+                ], width=4),
             ]),
 
             dbc.Row([
@@ -246,8 +249,33 @@ def render_content(tab, unique_sectors, unique_indices):
                 ],
                     className='mb-4'
                 ),
-            ])
-        ])
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card(html.H2('Individual Pair Detail'), body=True, color="dark", outline=True , className='btn-primary',
+                             style={"width": "50%", "text-align": "center" , 'color' : 'white'})
+                ], width={"size": 12}, className='mb-4 d-flex justify-content-center align-items-center')
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dcc.Dropdown(
+                        id='pairs-dropdown',
+                        placeholder='Select pair'  # Placeholder text
+                    )  # This dropdown's options will be updated dynamically
+                ], width={"size": 4})
+            ], className='mb-4 d-flex justify-content-center align-items-center'),
+            dbc.Row([
+                dbc.Col([
+                    dcc.Loading(dcc.Graph(id='pair-graph',
+                                          style={
+                                              'height': '800px',
+                                              'width': '800px',
+                                              'margin-left': 'auto',
+                                              'margin-right': 'auto'
+                                          }))
+                ])
+            ], className='justify-content-center align-items-center')
+        ] )
 
 
 def register_callbacks(app, db):
@@ -424,7 +452,10 @@ def register_callbacks(app, db):
         return db.retrieve_saved_pair_names()
 
     @app.callback(
-        Output('portfolio-graph', 'figure'),
+        [Output('portfolio-graph', 'figure'),
+         Output('max_drawdown', 'children'),
+         Output('sharpe_ratio', 'children'),
+         Output('sortino_ratio', 'children')],
         [
             Input('nametag-dropdown', 'value'),
             Input('strategydate-picker', 'start_date'),
@@ -437,10 +468,10 @@ def register_callbacks(app, db):
         ]
     )
     def update_portfolio_graph(nametag, start_date, end_date, z_entry, z_exit, z_stop, z_reentry, strategy):
-        if nametag is None or strategy is None:
+        if nametag is None or strategy is None or strategy == 'Select Strategy type':
             fig = go.Figure()
             fig.update_layout(template='plotly_dark')
-            return fig
+            return fig , None , None , None
 
         pairs = db.retrieve_pairs(nametag)
         tickers = list(set([ticker for pair in pairs for ticker in pair]))
@@ -462,7 +493,8 @@ def register_callbacks(app, db):
         strategy.generate_all_models(training_data=training_data)
         strategy.backtest_portfolio(backtest_data=backtest_data)
 
-        return strategy.plot_portfolio_statistics()
+        return (strategy.plot_portfolio_statistics() , strategy.portfolio_statistics['max_drawdown']
+                , strategy.portfolio_statistics['sharpe_ratio'] , strategy.portfolio_statistics['sortino_ratio'])
 
     @app.callback(
         Output("pairs-table", "children"),
@@ -476,3 +508,58 @@ def register_callbacks(app, db):
         # Convert the data to a DataFrame
         df = pd.DataFrame(selected_pairs_data, columns=['ticker1', 'ticker2'])
         return dbc.Table.from_dataframe(df, striped=True, bordered=True, hover=True, style={'textAlign': 'center'})
+
+    @app.callback(
+        Output('pairs-dropdown', 'options'),
+        Input('nametag-dropdown', 'value'),
+    )
+    def update_dropdown_options(selected_nametag):
+        if not selected_nametag:
+            return []
+
+        # Fetch pairs related to the selected nametag from the database
+        pairs = db.retrieve_pairs(nametag = selected_nametag)
+        options = [{"label": str(tuple(pair)), "value": str(tuple(pair))} for pair in pairs]
+
+        return options
+
+    @app.callback(
+        Output('pair-graph', 'figure'),
+        Input('pairs-dropdown', 'value'),
+        Input('strategy-dropdown', 'label'),
+        Input('strategydate-picker', 'start_date'),
+        Input('strategydate-picker', 'end_date'),
+        Input('z-entry-slider', 'value'),
+        Input('z-exit-slider', 'value'),
+        Input('z-stoploss-slider', 'value'),
+        Input('z-reentry-slider', 'value')
+    )
+    def update_graph(selected_pair , strategy , start_date , end_date , z_entry , z_exit , z_stop , z_reentry):
+        if selected_pair is None or strategy is None or selected_pair == 'Select pair':
+            fig = go.Figure()
+            fig.update_layout(template='plotly_dark')
+            return fig
+
+        # Extract pair from ('ticker1' , 'ticker2') format
+        pair = eval(selected_pair)
+        # Convert tuple to list
+        pair= list(pair)
+
+
+        pairs = [pair]
+
+
+
+        prices = db.retrieve_prices(tickers=pair, start_date=start_date, end_date=end_date)
+        prices = prices.pivot_table(index='date', columns='ticker', values='adj close')
+
+        if strategy == 'OLS Strategy':
+            strategy = OLSStrategy(price_df=prices, pairs=pairs, start_date=start_date, end_date=end_date
+                                   , parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                 'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry})
+        elif strategy == 'Kalman Strategy':
+            strategy = KalmanStrategy()
+
+        strategy.generate_model(pair = pair , training_data=prices)
+
+        return strategy.plot_pair(pair=pair)

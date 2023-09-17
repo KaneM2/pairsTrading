@@ -1,11 +1,12 @@
 from scripts.utils.util_classes import CustomLogger
 from scripts.utils.util_functions import normalise_prices
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
 from plotly.subplots import make_subplots
 import statsmodels.api as sm
-from sklearn.manifold import MDS
+from sklearn.manifold import MDS ,TSNE
 
 logger = CustomLogger.get_logger(name=__name__)
 
@@ -128,6 +129,7 @@ class cointergrationSelector(pairsSelector):
         tickers = self.normalised_df.columns
         pairs = []
         pairs_spread_half_life = []
+        seen_pairs = set()
         for i in range(n):
             for j in range(n):
                 logger.info('Calculating pair {} out of {} pairs'.format(i * n + j, n ** 2))
@@ -140,28 +142,36 @@ class cointergrationSelector(pairsSelector):
                 pvalue_matrix[i, j] = p_val
 
                 if p_val < self.options['pval_threshold'] and i != j:
-                    pairs.append((tickers[i], tickers[j], p_val))
+                    pair_forward = (tickers[i], tickers[j])
+                    pair_backward = (tickers[j], tickers[i])
 
-                    # Calculate half life of spread
+                    # Check if pair already exists in either order
+                    if pair_forward not in seen_pairs and pair_backward not in seen_pairs:
+                        pairs.append((tickers[i], tickers[j], p_val))
+                        seen_pairs.add(pair_forward)
+                        seen_pairs.add(pair_backward)
 
-                    # Implement OLS regression
-                    x = sm.add_constant(self.normalised_df.iloc[:, i]).values
-                    y = self.normalised_df.iloc[:, j].values
-                    model = sm.OLS(y, sm.add_constant(x))
 
-                    results = model.fit()
-                    residuals = results.resid
+                        # Calculate half life of spread
 
-                    # Construct lagged residuals series
-                    lagged_residuals = residuals[:-1]
-                    residuals = residuals[1:]
+                        # Implement OLS regression
+                        x = sm.add_constant(self.normalised_df.iloc[:, i]).values
+                        y = self.normalised_df.iloc[:, j].values
+                        model = sm.OLS(y, sm.add_constant(x))
 
-                    # Run OLS regression on residuals and lagged residuals
-                    model = sm.OLS(residuals, sm.add_constant(lagged_residuals))
-                    results = model.fit()
-                    phi = results.params[1]
-                    half_life = -np.log(2) / phi
-                    pairs_spread_half_life.append((tickers[i] , tickers[j] , half_life))
+                        results = model.fit()
+                        residuals = results.resid
+
+                        # Construct lagged residuals series
+                        lagged_residuals = residuals[:-1]
+                        residuals = residuals[1:]
+
+                        # Run OLS regression on residuals and lagged residuals
+                        model = sm.OLS(residuals, sm.add_constant(lagged_residuals))
+                        results = model.fit()
+                        phi = results.params[1]
+                        half_life = -np.log(2) / phi
+                        pairs_spread_half_life.append((tickers[i] , tickers[j] , half_life))
 
         pvalue_df = pd.DataFrame(pvalue_matrix, index=self.normalised_df.columns,
                                  columns=self.normalised_df.columns)
@@ -182,7 +192,7 @@ class cointergrationSelector(pairsSelector):
         pvalue_df = self.pvalue_df.loc[tickers, tickers]
 
         combined_fig = make_subplots(rows=1, cols=2 , subplot_titles=
-        ['p-value matrix for {} tickers with Engle-Granger test'.format(len(tickers)),
+        ['p-value matrix for top {} tickers with Engle-Granger test'.format(len(tickers)),
          'p-value vs half life for selected pairs'
          ])
 
@@ -245,6 +255,42 @@ class correlationSelector(pairsSelector):
         self.corr_df = corr
 
         return closest_pairs
+
+    def plot_summary(self, pairs):
+        tickers = list(set([ticker for pair in pairs for ticker in pair]))
+        # Plot plotly heatmap from distance_matrix with tickers as labels with meaningful colormap for distance
+        correlation_df = self.corr_df.loc[tickers, tickers]
+
+        combined_fig = make_subplots(rows=1, cols=2, subplot_titles=
+        ['Correlation matrix for top {} tickers '.format(len(tickers)),
+         "Multidimensional Scaling of tickers based on Correlation Matrix"
+         ])
+
+        fig1 = px.imshow(correlation_df, color_continuous_scale='RdBu_r')
+
+        # Apply MDS
+        mds = MDS(n_components=2, dissimilarity='precomputed', normalized_stress='auto')
+        data_2d = mds.fit_transform(correlation_df)
+
+        # Create a DataFrame for 2D data for easy plotting
+        data_2d_df = pd.DataFrame(data_2d, columns=['x', 'y'])
+        data_2d_df['ticker'] = correlation_df.index
+
+        # Create the Plotly figure
+        fig2 = px.scatter(data_2d_df, x='x', y='y', text='ticker')
+        fig2.update_layout(
+
+            xaxis_title="MDS 1",
+            yaxis_title="MDS 2",
+        )
+
+        for trace in fig1['data']:
+            combined_fig.add_trace(trace, row=1, col=1)
+        for trace in fig2['data']:
+            combined_fig.add_trace(trace, row=1, col=2)
+
+        combined_fig.update_layout(template='plotly_dark')
+        return combined_fig
 
 
 if __name__ == '__main__':

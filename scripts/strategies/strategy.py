@@ -32,6 +32,48 @@ class baseStrategy:
         sharpe_ratio = portfolio['returns'].mean() / portfolio['returns'].std()
         sortino_ratio = portfolio['returns'].mean() / portfolio[portfolio['returns'] < 0]['returns'].std()
 
+        self.portfolio_statistics = {
+            'max_drawdown': str(max_drawdown.round(2)) +' %',
+            'sharpe_ratio': sharpe_ratio.round(2),
+            'sortino_ratio': sortino_ratio.round(2)
+        }
+
+    def plot_pair(self , pair):
+        ticker1 , ticker2 = pair
+        pair_portfolio = self.backtest_pair(pair=pair, backtest_data=self.price_df)
+        fig = make_subplots(rows=3, cols=1, subplot_titles=
+        ['Spread Price',
+         'Position' ,
+         'Z-Score'
+         ])
+
+        fig.add_trace(go.Scatter(x=pair_portfolio.index, y=pair_portfolio['spread_price'], name='Spread Price'), row=1,
+                      col=1)
+        fig.add_trace(go.Scatter(x=pair_portfolio.index, y=pair_portfolio['position'], name='Position'), row=2, col=1)
+
+        fig.add_trace(go.Scatter(x=pair_portfolio.index, y=pair_portfolio['z_score'], name='Z-Score'), row=3, col=1)
+
+        # Add dotted faint horizontal lines for z_entry , z_exit, z_stop_loss and z_restart
+        # Make each line a different color and label it
+
+        fig.add_hline(y=self.parameters['z_entry_threshold'], line_dash="dot", row=3, col=1 , annotation_text="z_entry" , annotation_position = 'top right')
+        fig.add_hline(y=-1*self.parameters['z_entry_threshold'], line_dash="dot", row=3, col=1, annotation_text="z_entry" , annotation_position = 'bottom right')
+
+        fig.add_hline(y=self.parameters['z_exit_threshold'], line_dash="dot", row=3, col=1 , annotation_text="z_exit", annotation_position = 'top right' , line_color = 'green')
+        fig.add_hline(y=-self.parameters['z_exit_threshold'], line_dash="dot", row=3, col=1, annotation_text="z_exit", annotation_position = 'bottom right' , line_color = 'green')
+
+        fig.add_hline(y=self.parameters['stop_loss_threshold'], line_dash="dot", row=3, col=1, annotation_text="z_stop_loss" ,  annotation_position = 'top left' , line_color = 'red')
+        fig.add_hline(y=-self.parameters['stop_loss_threshold'], line_dash="dot", row=3, col=1,
+                      annotation_text="z_stop_loss" , annotation_position = 'bottom left' , line_color = 'red')
+
+        fig.add_hline(y=self.parameters['z_restart_threshold'], line_dash="dot", row=3, col=1, annotation_text="z_restart" , annotation_position = 'top left')
+        fig.add_hline(y=-self.parameters['z_restart_threshold'], line_dash="dot", row=3, col=1,
+                      annotation_text="z_restart" , annotation_position = 'bottom left')
+
+
+        fig.update_layout(template='plotly_dark')
+        return fig
+
 
     # Method to backtest a single pair
     def backtest_pair(self):
@@ -210,13 +252,13 @@ class OLSStrategy(baseStrategy):
 
 
 class KalmanStrategy(baseStrategy):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, price_df, pairs, start_date, end_date, parameters=
+    {'z_entry_threshold': 1.5, 'z_exit_threshold': 0, 'stop_loss_threshold': 2, 'z_restart_threshold': 0}):
+        super().__init__(price_df, pairs, start_date, end_date, parameters)
+        self.pair_model_attributes = {}
 
 
-class distanceStrategy(baseStrategy):
-    def __init__(self):
-        super().__init__()
+
 
 
 if __name__ == '__main__':

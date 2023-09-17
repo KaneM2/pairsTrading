@@ -42,6 +42,7 @@ class yfinanceScraper(Scraper):
 
         # Don't forget to yield any remaining data that didn't form a complete batch of 50
         if batch_data:
+            logger.info('Writing last batch of tickers to database')
             yield pd.concat(batch_data)
 
 

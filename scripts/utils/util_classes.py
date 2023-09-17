@@ -1,5 +1,6 @@
 from scripts.utils.util_functions import read_config
 from config import BASE_DIR
+
 import logging
 import os
 import datetime as dt

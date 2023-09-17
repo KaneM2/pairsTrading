@@ -1,6 +1,8 @@
-from pymongo import MongoClient
 from scripts.utils.util_functions import read_config
 from scripts.utils.util_classes import CustomLogger
+
+from pymongo import MongoClient
+
 
 logger = CustomLogger.get_logger(name = __name__)
 def mongodb_setup(config = read_config('database') , local = True):
