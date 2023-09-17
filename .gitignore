@@ -2,4 +2,11 @@
 *.txt
 
 # Ignore Jupyter Notebook checkpoints
+*.ipynb
 .ipynb_checkpoints/
+*.idea
+
+# Ignore Python compiled files
+__pycache__/
+
+data/db

@@ -1,0 +1,23 @@
+body {
+  background-color: #86e6fe;
+}
+
+#name-tag-input, #save-button, #save-output {
+    height: 40px;
+}
+
+#date-range-slider {
+    margin-bottom: 100px;
+}
+
+.indicator-box {
+  background-color:  #006400;
+  border: 1px solid #aaa;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.btn-primary {
+  background-color: #4169e1 ;
+  border-color: #4169e1 ;
+}

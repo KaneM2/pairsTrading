@@ -1,0 +1,32 @@
+database:
+  local:
+    host: localhost
+    port: 27017
+    db_name: marketdb
+    user: username
+    password: password
+  remote:
+    host: pairstradingcluster.hoyzm5p.mongodb.net
+    user: admin_user
+    password : pJ5mOk3aag9NbbYo
+    db_name: marketdb
+  batch_size : 30000
+  collections :
+     tickers_collection_name : tickersCollection
+     price_collection_name : priceCollection
+     pairs_collection_name : pairsCollection
+     strategies_collection_name : strategiesCollection
+  indices :
+    - tickersCollection: ('ticker' , 'name' , 'sector' , 'index')
+    - priceCollection: ('ticker' , 'date')
+    - pairsCollection: ('nametag' ,)
+    - strategiesCollection: ('name' ,)
+
+
+data:
+  start_data : 2010-01-01
+  end_data : null
+
+
+log:
+  path : 'logs\log.txt'
