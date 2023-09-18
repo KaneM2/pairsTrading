@@ -1,9 +1,12 @@
+from scripts.utils.util_functions import KalmanFilterAverage , KalmanFilterRegression , get_half_life
+
 import statsmodels.api as sm
 import pandas as pd
 import plotly.express as px
 import datetime as dt
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
+
 
 
 class baseStrategy:
@@ -168,6 +171,7 @@ class OLSStrategy(baseStrategy):
         data = predict_data[[ticker1, ticker2]].dropna()
         data['spread'] = data[ticker2] - beta * data[ticker1] - alpha
 
+
         z_score = (data.spread - spread_mean) / spread_std
 
         # Initialise series to hold signals
@@ -224,10 +228,10 @@ class OLSStrategy(baseStrategy):
 
             # Forward fill the signals
         signals = signals.fillna(method='ffill').fillna(0)
-        return signals , z_score , beta
+        return signals , z_score , alpha , beta
 
     def backtest_pair(self, pair, backtest_data):
-        signals , z_score , beta = self.generate_signals(pair , predict_data = backtest_data)
+        signals , z_score , alpha , beta = self.generate_signals(pair , predict_data = backtest_data)
         ticker1 , ticker2 = pair
 
         prices = backtest_data[[ticker1, ticker2]].dropna()
@@ -236,7 +240,7 @@ class OLSStrategy(baseStrategy):
 
         # Create portfolio DataFrame to store values
         portfolio = pd.DataFrame(index=signals.index)
-        portfolio['spread_price'] = prices[ticker2] - beta*prices[ticker1]
+        portfolio['spread_price'] = prices[ticker2] - beta*prices[ticker1] - alpha
         portfolio['signals'] = signals
         portfolio['z_score'] = z_score
         portfolio['position'] = portfolio['signals'].cumsum() # Buy=1, Sell=-1, Hold=0
@@ -255,7 +259,111 @@ class KalmanStrategy(baseStrategy):
     def __init__(self, price_df, pairs, start_date, end_date, parameters=
     {'z_entry_threshold': 1.5, 'z_exit_threshold': 0, 'stop_loss_threshold': 2, 'z_restart_threshold': 0}):
         super().__init__(price_df, pairs, start_date, end_date, parameters)
-        self.pair_model_attributes = {}
+
+
+    def generate_signals(self , pair , predict_data):
+        z_entry_threshold = self.parameters['z_entry_threshold']
+        z_exit_threshold = self.parameters['z_exit_threshold']
+        stop_loss_threshold = self.parameters['stop_loss_threshold']
+        z_restart_threshold = self.parameters['z_restart_threshold']
+
+        # Generate signals for a pair using Kalman Filter
+
+
+        ticker1, ticker2 = pair
+        prices = predict_data[[ticker1, ticker2]].dropna()
+
+        state_means = KalmanFilterRegression(KalmanFilterAverage(prices[ticker1]), KalmanFilterAverage(prices[ticker2]))
+
+        prices['hr'] = - state_means[:, 0]
+        prices['spread'] = prices[ticker2] + (prices[ticker1] * prices.hr)
+
+        # calculate half life
+        halflife = get_half_life(prices['spread'])
+
+        # calculate z-score with window = half life period
+        spread_mean = prices.spread.rolling(window=halflife).mean()
+        spread_std = prices.spread.rolling(window=halflife).std()
+        prices['z_score'] = (prices.spread - spread_mean) / spread_std
+
+
+        z_score = (prices.spread - spread_mean) / spread_std
+
+        # Initialise series to hold signals
+        signals = pd.Series(index=z_score.index).fillna(0)
+
+        # Initialize variables to hold state
+        position = 0
+        stop_loss_triggered = False
+        stop_trigger_side = 0
+
+        # Loop through each z-score
+        # If z_score outside entry_threshold, enter position
+        # If position is open and z_score outside stop_loss_threshold, close position
+        # If position is open and z_score crosses exit_threshold, close position
+        # If stop loss is triggered, wait for z_score to cross restart_threshold before re-entering position
+
+        for i in range(len(z_score)):
+            if stop_loss_triggered:
+                signals[i] = 0  # Signal to close position
+
+                # Check if we can reset stop-loss trigger
+                if z_score[i] * stop_trigger_side * -1 <= z_restart_threshold:
+                    stop_loss_triggered = False  # Reset stop-loss trigger
+
+            if not stop_loss_triggered:
+                if position == 0:  # No position
+                    if z_score[i] > z_entry_threshold:
+                        position = -1  # Short
+                        signals[i] = -1
+                    elif z_score[i] < -z_entry_threshold:
+                        position = 1  # Long
+                        signals[i] = 1
+
+                elif position == 1:  # Long on the spread
+                    if z_score[i] > -z_exit_threshold:
+                        position = 0  # Close position
+                        signals[i] = -1
+                    elif z_score[i] < -stop_loss_threshold:
+                        position = 0  # Close position
+                        signals[i] = -1
+                        stop_trigger_side = 1
+                        stop_loss_triggered = True  # Activate stop-loss
+
+                elif position == -1:  # Short on the spread
+                    if z_score[i] < z_exit_threshold:
+                        position = 0  # Close position
+                        signals[i] = 1
+                    elif z_score[i] > stop_loss_threshold:
+                        position = 0  # Close position
+                        signals[i] = 1
+                        stop_trigger_side = -1
+                        stop_loss_triggered = True  # Activate stop-loss
+
+            # Forward fill the signals
+        signals = signals.fillna(method='ffill').fillna(0)
+        return signals , z_score , prices['spread']
+
+
+    def backtest_pair(self, pair, backtest_data):
+        signals , z_score , spread = self.generate_signals(pair , predict_data = backtest_data)
+
+
+        # Create portfolio DataFrame to store values
+        portfolio = pd.DataFrame(index=signals.index)
+        portfolio['spread_price'] = spread
+        portfolio['signals'] = signals
+        portfolio['z_score'] = z_score
+        portfolio['position'] = portfolio['signals'].cumsum() # Buy=1, Sell=-1, Hold=0
+        portfolio['price_delta'] = portfolio['spread_price'].diff().fillna(0)
+
+        portfolio['profit'] = (portfolio['price_delta'] * portfolio['position'].shift(1)).fillna(0)
+        portfolio['equity_curve'] = portfolio['profit'].cumsum()
+
+
+        return portfolio
+
+
 
 
 
@@ -286,13 +394,12 @@ if __name__ == '__main__':
     closest_pairs = selector.get_pairs()
     closest_pair = closest_pairs[0]
 
-    strategy = OLSStrategy(price_df=prices, pairs=closest_pairs, start_date=start_data, end_date=end_data)
+    strategy = KalmanStrategy(price_df=prices, pairs=closest_pairs, start_date=start_data, end_date=end_data)
 
     train_test_split = 0.6
     train_test_split_index = int(len(strategy.price_df) * train_test_split)
     training_data = strategy.price_df.iloc[:train_test_split_index]
     backtest_data = strategy.price_df.iloc[train_test_split_index:]
 
-    strategy.generate_all_models(training_data=training_data)
     strategy.backtest_portfolio(backtest_data= backtest_data)
 

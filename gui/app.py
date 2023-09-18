@@ -15,7 +15,7 @@ app.layout = layout
 def run_app(db):
     # Register callbacks
     register_callbacks(app , db)
-    app.run_server(debug=True)
+    app.run_server(debug=False)
 
 if __name__ == "__main__":
     run_app()

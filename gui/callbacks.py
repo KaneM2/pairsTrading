@@ -3,12 +3,14 @@ from scripts.pairs_selection.pairs_selector import distanceSelector, correlation
 from scripts.strategies.strategy import OLSStrategy, KalmanStrategy
 from scripts.utils.util_classes import CustomLogger
 
+import dash
 from dash import Input, Output, State, dcc, html
 import dash_bootstrap_components as dbc
 from dash import callback_context
 import datetime as dt
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
 logger = CustomLogger.get_logger(name=__name__)
 
@@ -181,16 +183,25 @@ def render_content(tab, unique_sectors, unique_indices):
                     )
                 ], width = 8),
                 dbc.Col([
-                    dbc.Table([
-                        html.Thead([
-                            html.Tr([html.Th("Statistic"), html.Th("Value")])
-                        ]),
-                        html.Tbody([
-                            html.Tr([html.Td("Max Drawdown"), html.Td(id='max_drawdown')]),
-                            html.Tr([html.Td("Sharpe Ratio"), html.Td(id='sharpe_ratio')]),
-                            html.Tr([html.Td("Sortino Ratio"), html.Td(id='sortino_ratio')]),
-                        ])
-                    ]),
+                    dbc.Container([
+                        dbc.Table([
+                            html.Thead([
+                                html.Tr([html.Th("Statistic"), html.Th("Value")])
+                            ]),
+                            html.Tbody([
+                                html.Tr([html.Td("Max Drawdown"), html.Td(id='max_drawdown')]),
+                                html.Tr([html.Td("Sharpe Ratio"), html.Td(id='sharpe_ratio')]),
+                                html.Tr([html.Td("Sortino Ratio"), html.Td(id='sortino_ratio')]),
+                            ]),
+                        ], className='w-100'),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Button('Optimize Sharpe', id='optimize-button', color='primary', size="lg",
+                                           className='text-nowrap')
+                            ], className='d-flex justify-content-center align-items-center',
+                                width={"size": 4, "offset": 0})
+                        ], className='mt-4 justify-content-center')
+                    ])
                 ], width=4),
             ]),
 
@@ -467,8 +478,8 @@ def register_callbacks(app, db):
             Input('strategy-dropdown', 'label')
         ]
     )
-    def update_portfolio_graph(nametag, start_date, end_date, z_entry, z_exit, z_stop, z_reentry, strategy):
-        if nametag is None or strategy is None or strategy == 'Select Strategy type':
+    def update_portfolio_graph(nametag, start_date, end_date, z_entry, z_exit, z_stop, z_reentry, strategy_name):
+        if nametag is None or strategy_name is None or strategy_name == 'Select Strategy type':
             fig = go.Figure()
             fig.update_layout(template='plotly_dark')
             return fig , None , None , None
@@ -478,19 +489,21 @@ def register_callbacks(app, db):
         prices = db.retrieve_prices(tickers=tickers, start_date=start_date, end_date=end_date)
         prices = prices.pivot_table(index='date', columns='ticker', values='adj close')
 
-        if strategy == 'OLS Strategy':
+        if strategy_name == 'OLS Strategy':
             strategy = OLSStrategy(price_df=prices, pairs=pairs, start_date=start_date, end_date=end_date
                                    , parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
                                                  'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry})
-        elif strategy == 'Kalman Strategy':
-            strategy = KalmanStrategy()
+        elif strategy_name == 'Kalman Strategy':
+            strategy = KalmanStrategy(price_df=prices, pairs=pairs, start_date=start_date, end_date=end_date
+                                   , parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                 'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry})
 
         # Use same data for training and backtest , some lookahead bias here. Should really be using different windows
         # for training and backtest.
         training_data = prices
         backtest_data = prices
-
-        strategy.generate_all_models(training_data=training_data)
+        if strategy_name == 'OLS Strategy':
+            strategy.generate_all_models(training_data=training_data)
         strategy.backtest_portfolio(backtest_data=backtest_data)
 
         return (strategy.plot_portfolio_statistics() , strategy.portfolio_statistics['max_drawdown']
@@ -534,8 +547,8 @@ def register_callbacks(app, db):
         Input('z-stoploss-slider', 'value'),
         Input('z-reentry-slider', 'value')
     )
-    def update_graph(selected_pair , strategy , start_date , end_date , z_entry , z_exit , z_stop , z_reentry):
-        if selected_pair is None or strategy is None or selected_pair == 'Select pair':
+    def update_graph(selected_pair , strategy_name , start_date , end_date , z_entry , z_exit , z_stop , z_reentry):
+        if selected_pair is None or strategy_name is None or selected_pair == 'Select pair':
             fig = go.Figure()
             fig.update_layout(template='plotly_dark')
             return fig
@@ -553,13 +566,94 @@ def register_callbacks(app, db):
         prices = db.retrieve_prices(tickers=pair, start_date=start_date, end_date=end_date)
         prices = prices.pivot_table(index='date', columns='ticker', values='adj close')
 
-        if strategy == 'OLS Strategy':
+        if strategy_name == 'OLS Strategy':
             strategy = OLSStrategy(price_df=prices, pairs=pairs, start_date=start_date, end_date=end_date
                                    , parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
                                                  'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry})
-        elif strategy == 'Kalman Strategy':
-            strategy = KalmanStrategy()
 
-        strategy.generate_model(pair = pair , training_data=prices)
+        elif strategy_name == 'Kalman Strategy':
+            strategy = KalmanStrategy(price_df=prices, pairs=pairs, start_date=start_date, end_date=end_date
+                                   , parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                 'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry})
+
+
+        if strategy_name == 'OLS Strategy':
+            strategy.generate_model(pair = pair , training_data=prices)
 
         return strategy.plot_pair(pair=pair)
+
+    # Callback definition
+    @app.callback(
+        [
+            Output('z-entry-slider', 'value'),
+            Output('z-exit-slider', 'value'),
+            Output('z-stoploss-slider', 'value'),
+            Output('z-reentry-slider', 'value')
+        ],
+        [Input('optimize-button', 'n_clicks'),
+         State('nametag-dropdown', 'value'),
+         State('strategy-dropdown', 'label'),
+         State('strategydate-picker', 'start_date'),
+         State('strategydate-picker', 'end_date')
+         ],
+    )
+    def update_sliders(n_clicks , pairs_nametag , strategy_name , start_date , end_date):
+        if n_clicks is None or pairs_nametag is None or strategy_name is None or pairs_nametag == 'Select pair':
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        pairs = db.retrieve_pairs(pairs_nametag)
+        tickers = list(set([ticker for pair in pairs for ticker in pair]))
+        prices = db.retrieve_prices(tickers=tickers, start_date=start_date, end_date=end_date)
+        prices = prices.pivot_table(index='date', columns='ticker', values='adj close')
+        max_sharpe = -9999
+
+        if strategy_name == 'OLS Strategy':
+            for z_entry in np.arange(0, 2, 1):
+                for z_exit in np.arange(0, 1, 0.5):
+                    for z_stop in np.arange(0, 3, 1):
+                        for z_reentry in np.arange(0, 3, 1):
+                            if z_entry > z_exit:
+                                if z_reentry < z_stop:
+                                    print(z_entry, z_exit, z_stop, z_reentry)
+                                    strategy = OLSStrategy(price_df=prices, pairs=pairs, start_date=start_date, end_date=end_date
+                                                           , parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                                         'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry})
+                                    strategy.generate_all_models(training_data=prices)
+                                    strategy.backtest_portfolio(backtest_data=prices)
+                                    sharpe = strategy.portfolio_statistics['sharpe_ratio']
+
+                                    # Get max sharpe ratio
+                                    if sharpe > max_sharpe:
+                                        max_sharpe = sharpe
+                                        optimal_params = {'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                          'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry}
+
+        elif strategy_name == 'Kalman Strategy':
+            for z_entry in np.arange(0, 2, 1):
+                for z_exit in np.arange(0, 1, 0.5):
+                    for z_stop in np.arange(0, 3, 1):
+                        for z_reentry in np.arange(0, 3, 1):
+                            if z_entry > z_exit:
+                                if z_reentry < z_stop:
+                                    print(z_entry , z_exit , z_stop , z_reentry)
+                                    logger.info('Calculating strategy for z_entry : {} , z_exit : {} , z_stop : {} , z_reentry : {}'.format(z_entry , z_exit , z_stop , z_reentry))
+                                    strategy = KalmanStrategy(price_df=prices, pairs=pairs, start_date=start_date,
+                                                           end_date=end_date
+                                                           ,
+                                                           parameters={'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                                       'stop_loss_threshold': z_stop,
+                                                                       'z_restart_threshold': z_reentry})
+                                    strategy.backtest_portfolio(backtest_data=prices)
+                                    sharpe = strategy.portfolio_statistics['sharpe_ratio']
+
+                                    # Get max sharpe ratio
+                                    if sharpe > max_sharpe:
+                                        max_sharpe = sharpe
+                                        optimal_params = {'z_entry_threshold': z_entry, 'z_exit_threshold': z_exit,
+                                                          'stop_loss_threshold': z_stop, 'z_restart_threshold': z_reentry}
+
+        print(optimal_params)
+        # Update the sliders
+        return optimal_params['z_entry_threshold'], optimal_params['z_exit_threshold'], optimal_params[
+            'stop_loss_threshold'], optimal_params['z_restart_threshold']
+
