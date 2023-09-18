@@ -1,5 +1,5 @@
 # Ignore log files
-*.txt
+*log.txt
 
 # Ignore Jupyter Notebook checkpoints
 *.ipynb
