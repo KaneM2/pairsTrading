@@ -42,7 +42,7 @@ This tool allows users to test and evaluate various equity pair-trading strategi
 5. Initialise mongodb in this folder : ```mongod --dbpath <path-to-project>\pairsTrading\data\db```
 6. Run main.py with arguments to use local db and to initialise it by scraping data (Only S&P 500 data is included for speed purposed but Nasdaq 100 and Russell 2000 can be added by adding to the command line argument) :
 ```
-python main.py --db local --db_initialise True --indices "S&P 500" "Nasdaq 100"
+python main.py --db local --db_initialise True --indices "S&P 500"
 ```
 
 
