@@ -37,7 +37,7 @@ def run(args):
         tickers_scraper = tickersScraper(db=db, collection_name=tickers_collection_name )
         tickers_scraper.run()
 
-        tickers = db.retrieve_tickers(indices=args.indices)[:20]
+        tickers = db.retrieve_tickers(indices=args.indices)
         price_scraper = yfinanceScraper(db=db, collection_name=price_collection_name, start_data=start_data,
                                         end_data=end_data, tickers=tickers )
         price_scraper.run()
